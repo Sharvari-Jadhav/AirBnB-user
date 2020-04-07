@@ -1,0 +1,676 @@
+---
+title: "BUAN6357_AirBnBProject_Jadhav"
+output: 
+  html_document: 
+    toc: yes
+---
+
+__Load required packages:__
+```{r loadpackages, message=FALSE}
+#Load packages
+if (!require('caret')) {
+  install.packages('caret')
+}
+if (!require('ggplot2')) {
+  install.packages('ggplot2')
+}
+if (!require('rworldmap')) {
+  install.packages('rworldmap')
+}
+if (!require('gridExtra')) {
+  install.packages('gridExtra')
+}
+if (!require('car')) {
+  install.packages('car')
+}
+if (!require('xgboost')) {
+  install.packages('xgboost')
+}
+if (!require('Ckmeans.1d.dp')) {
+  install.packages('Ckmeans.1d.dp')
+}
+if (!require('tidyr')) {
+  install.packages('tidyr')
+}
+if (!require('readr')) {
+  install.packages('readr')
+}
+if (!require('dplyr')) {
+  install.packages('dplyr')
+}
+if (!require('e1071')) {
+  install.packages('e1071')
+}
+if (!require('caTools')) {
+  install.packages('caTools')
+}
+if (!require('rpart')) {
+  install.packages('rpart')
+}
+if (!require('randomForest')) {
+  install.packages('randomForest')
+}
+if (!require('GGally')) {
+  install.packages('GGally')
+}
+if (!require('stringr')) {
+  install.packages('stringr')
+}
+if (!require('e1071')) {
+  install.packages('e1071')
+}
+if (!require('class')) {
+  install.packages('class')
+}
+if (!require('corrplot')) {
+  install.packages('corrplot')
+}
+
+```
+
+__Load the data set:__
+```{r}
+#Load dataset
+df <- read.csv("train_users_2.csv")
+
+#Basic data exploration
+cat("Dimension:")
+dim(df)
+
+cat("\n","Names of columns:",'\n')
+names(df)
+
+cat("\n","Structure of dataset:",'\n')
+str(df)
+
+cat("\n","Summary:",'\n')
+summary(df)
+
+cat("\n","First look at the dataset:",'\n')
+head(df)
+```
+
+__Performing PCA:__
+```{r}
+
+#PCA to check for features having max variance
+ZV <- nearZeroVar(df, saveMetrics = TRUE)
+ZV
+
+```
+
+__Analyzing user's age:__
+```{r}
+#Analyzing user's age
+cat("Summary of user's age","\n")
+summary(df$age)
+qplot(x = age, data = df, binwidth = 1,fill = df$gender, facets = .~gender, xlim = c(18,75), main = "Distribution of age across genders")+ guides(fill=guide_legend(title="Gender"))
+
+cat("\n","Summary of user's age across genders","\n")
+by(df$age, df$gender, summary)
+```
+
+```{r}
+#Age by a Destination Country
+by(df$age, df$country_destination, summary)
+
+ggplot(df, aes(country_destination, age)) +
+  geom_boxplot(aes(), fill ="red") + 
+  ylim(25,50)+ggtitle("Distribution of age across country destinations")+xlab("Country destination")
+
+ggplot(df, aes(age)) +
+  geom_histogram(binwidth = 1, color = 'black', fill = '#099DD9') +
+  xlim(18,75) +
+  facet_wrap(~country_destination, ncol = 3, scales = "free")+ggtitle("Distribution of age across country destinations")
+
+ggplot(df, aes(age)) +
+  geom_histogram(binwidth = 1, color = 'black', fill = '#099DD9') +
+  geom_histogram(data=subset(df,age==20), color = "black", fill="red", binwidth = 1) +
+  scale_x_continuous(limits = c(15, 25), breaks = seq(15, 25, 1)) +
+  facet_wrap(~country_destination, ncol = 3, scales = "free")+ggtitle("Focusing on age group of 20 year old travellers")
+```
+
+```{r}
+#Age on a Map of Destination Countries
+df.age.summ <- summarise(group_by(df, country_destination), 
+                         medianAge = median(age, na.rm = TRUE),
+                         meanAge = mean(age, na.rm = TRUE),
+                         sdAge = sd(age, na.rm = TRUE)
+)
+capture.output(spdf <- joinCountryData2Map(subset(df.age.summ, country_destination != "other" & country_destination != "NDF"),
+                            joinCode="ISO_A2", 
+                            nameJoinColumn="country_destination",
+                            verbose = FALSE), file = 'NUL'
+)
+mapCountryData(spdf, 
+               nameColumnToPlot="medianAge", 
+               catMethod="fixedWidth", 
+               numCats=3,
+               mapTitle = "Median Age of Airbnb Users"
+)
+mapCountryData(spdf, 
+               nameColumnToPlot="meanAge", 
+               catMethod="fixedWidth", 
+               numCats=3,
+               mapTitle = "Mean Age of Airbnb Users"
+)
+df.age.summ2 <- summarise(group_by(subset(df, age<76 & age>17), country_destination),
+                          meanAge = mean(age, na.rm = TRUE),
+                          sdAge = sd(age, na.rm = TRUE))
+
+capture.output(spdf2 <- joinCountryData2Map(subset(df.age.summ2, 
+                                    country_destination != "other" & country_destination != "NDF"),
+                             joinCode="ISO_A2", 
+                             nameJoinColumn="country_destination",
+                            verbose = FALSE), file = 'NUL'
+)
+mapCountryData(spdf2, 
+               nameColumnToPlot="meanAge", 
+               catMethod="fixedWidth", 
+               numCats=10,
+               mapTitle = "Mean Age of Airbnb Users in the Age-Group 18-75"
+)
+```
+
+__Analyzing user's Gender:__
+```{r}
+#Analysing Users Gender
+ggplot(df, aes(x = gender)) + 
+  geom_bar(fill ="#E69F00")+
+  ggtitle("Overall gender distribution")
+
+df.gender <- spread(df, gender, age)
+colnames(df.gender)[15] <- "unknown"
+df.gender.summ <- summarise(group_by(df.gender, country_destination), 
+                            countF = sum(!is.na(FEMALE)),
+                            countM = sum(!is.na(MALE)),
+                            countO = sum(!is.na(OTHER)),
+                            countUn = sum(!is.na(unknown)),
+                            total_with_NA = n())
+capture.output(spdf <- joinCountryData2Map(subset(df.gender.summ, 
+                                   country_destination != "other" &
+                                     country_destination != "NDF"), 
+                            joinCode="ISO_A2", 
+                            nameJoinColumn="country_destination",
+                            verbose = FALSE), file = 'NUL'
+)
+df_map <- subset(spdf@data, !is.na(country_destination))
+par(mai= c(0,0,0.3,0),
+    xaxs = "i",
+    yaxs = "i")
+mapPies(dF =df_map,
+        nameX="LON",
+        nameY="LAT",
+        nameZs =c("countF",
+                  "countM",
+                  "countO",
+                  "countUn") ,
+        zColours=c("red",
+                   "green",
+                   "yellow",
+                   "blue"),
+        oceanCol = "lightblue",
+        landCol = "wheat",
+        addSizeLegend=T,
+        addCatLegend=F,
+        mapRegion="world",
+        xlim=c(-181,181),
+        ylim=c(-81,80),
+        symbolSize = 2)
+
+title(main=paste("Number of Airbnb Users by Gender"),
+      cex=3)
+
+legend(-180.1590,80,
+       legend=c("Female",
+                "Male",
+                "Other",
+                "Unknown"),
+       col=c("red",
+             "green",
+             "yellow",
+             "blue"),
+       pch=16,
+       cex=0.8,
+       pt.cex=1.5,
+       bty="o",
+       box.lty=0,
+       horiz = F,
+       bg="#FFFFFF70")
+```
+
+__Analysing Dates and Times:__
+```{r}
+
+#Analysing Dates and Times
+df$date_account_created <- as.character(df$date_account_created)
+df$date_first_booking <- as.character(df$date_first_booking)
+df$date_first_booking <- ifelse(df$date_first_booking == "", df$date_account_created, df$date_first_booking)
+df$date_account_created <- as.Date(df$date_account_created)
+df$date_first_booking <- as.Date(df$date_first_booking)
+
+summary(df$date_account_created)
+summary(df$date_first_booking)
+
+df$month_acc_created <- factor(format(df$date_account_created, format = "%B"), 
+                               levels = c("January", "February", "March", "April", 
+                                          "May", "June", "July", "August", "September",
+                                          "October", "November", "December")) 
+df$day_acc_created <- factor(format(df$date_account_created, format = "%d")) 
+df$dac_weekday <- factor(format(df$date_account_created, format = "%A"), 
+                         levels = c("Monday", "Tuesday", "Wednesday", 
+                                    "Thursday", "Friday", "Saturday", 
+                                    "Sunday"))
+
+
+df$month_first_book <- factor(format(df$date_first_booking, format = "%B"), 
+                              levels = c("January", "February", "March", "April", 
+                                         "May", "June", "July", "August", "September",
+                                         "October", "November", "December")) 
+df$day_first_book <- factor(format(df$date_first_booking, format = "%d")) 
+df$weekday_first_book <- factor(format(df$date_first_booking, format = "%A"), 
+                                levels = c("Monday", "Tuesday", "Wednesday", 
+                                           "Thursday", "Friday", "Saturday", 
+                                           "Sunday"))
+```
+
+__Analysing distribution of bookings:__
+```{r}
+#Monthly distribution of bookings
+tb<-table(df$month_first_book)
+tb_df<-as.data.frame(tb)
+colnames(tb_df) <- c("Month","Freq")
+tb_df
+
+
+qplot(x = month_first_book, data = df, fill = df$month_first_book, main = "Monthly bookings", xlab = "Month of first booking")+guides(fill=guide_legend(title="Month of booking"))
+
+ggplot(subset(df, country_destination != "NDF"), aes(x = month_first_book)) +
+  geom_bar(data=subset(df,country_destination != "NDF" &
+                         month_first_book %in% c("June", "May")),
+           color = "black", fill="green") +
+  geom_bar(data=subset(df,country_destination != "NDF" &
+                         month_first_book %in% c("January", "February", "March", "April", 
+                                                 "July", "August", "September",
+                                                 "October", "November", "December")),
+           color = "black", fill="red") +
+  facet_wrap(~country_destination, scales = "free")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  ggtitle("Monthly bookings across destinations") +xlab("Month of first booking")
+
+#Booking distribution spread across month
+qplot(x = day_first_book, data = df,fill = df$day_first_book, main = "Booking distribution spread across month", xlab = "Day of first booking")+guides(fill=guide_legend(title="Day of booking"))
+
+#Country wise booking distribution spread across month
+ggplot(subset(df, country_destination != "NDF"), aes(x=day_first_book)) +
+  geom_bar()+
+  facet_wrap(~country_destination, scales = "free")
+
+#Booking distribution spread across week
+qplot(x = weekday_first_book, data = df,fill = df$weekday_first_book, main = "Booking distribution spread across week", xlab = "Day of first booking")+guides(fill=guide_legend(title="Day of booking"))
+
+#Country wise frequency distribution of weekly bookings
+ggplot(subset(df, country_destination != "NDF"), aes(x=weekday_first_book)) +
+  geom_bar(fill = "red")+
+  facet_wrap(~country_destination, scales = "free")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  ggtitle("Country wise frequency distribution of weekly bookings") +xlab("Day of first booking")
+
+```
+
+```{r}
+
+#Days Between Signup and First Booking
+df$days_to_book <- as.numeric(df$date_first_booking - df$date_account_created)
+cat("Summary:","\n")
+summary(df$days_to_book)
+cat("\n")
+by(df$days_to_book, df$country_destination, summary)
+
+#Days Between Signup and First Booking across destinations
+ggplot(df, aes(country_destination, days_to_book)) +
+  geom_boxplot()
+
+```
+
+__Analysing SignUp method:__
+```{r}
+#Analysing SignUp method
+summary(df$signup_method)
+signupMethod <- df$signup_method
+p<-qplot(x = signup_method, data = df, fill = df$signup_method, main = "Signup method distribution", xlab = "Signup method", ylab = "Count")
+p <- p + guides(fill=guide_legend(title="Signup Method"))
+p
+
+#Facebook signups across destinations
+ggplot(subset(df, country_destination != "NDF" & country_destination != "US"  & signup_method == "facebook"), aes(x = signup_method)) +
+  geom_bar(fill = "steelblue")+
+  facet_wrap(~country_destination)+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  ggtitle("Country wise frequency distribution of facebook signups") +xlab("Facebook signups")
+
+```
+
+__Analysing Languge:__
+```{r}
+
+#Analysing Languge
+df <- within(df, language <- factor(language, 
+                                    levels=names(sort(table(language),
+                                                      decreasing=TRUE))))
+
+qAll <- ggplot(subset(df, country_destination == "NDF"),
+               aes(language)) +
+  geom_bar(aes(fill = gender)) +
+  ggtitle("Frequency distribution - NDF, All Languages")
+
+qWoEng <- ggplot(subset(df, country_destination == "NDF" & language != "en"),
+                 aes(language)) +
+  geom_bar(aes(fill = gender)) +
+  ggtitle("Frequency Distribution - NDF, W/o English")
+
+grid.arrange(qAll, qWoEng, ncol = 1)
+
+```
+
+
+__Predictive modelling:__
+```{r}
+
+#Predictive modelling
+
+#load dataset
+df_train = read.csv("train_users_2.csv")
+
+#Check for NA's
+sapply(df_train,function(x) sum(is.na(x)))
+
+# replace missing values
+df_train[is.na(df_train)] <- -1
+
+# Drop unnecessary columns
+df_train = df_train[-c(which(colnames(df_train) %in% c('date_first_booking','timestamp_first_active','id')))]
+
+# split date_account_created in year, month and day
+dac = as.data.frame(str_split_fixed(df_train$date_account_created, '-', 3))
+df_train['dac_year'] = dac[,1]
+df_train['dac_month'] = dac[,2]
+df_train['dac_day'] = dac[,3]
+df_train$date_account_created <- as.Date(as.character(df_train$date_account_created) )
+df_train$dac_weekday <- factor(format(df_train$date_account_created, format = "%A"), 
+                               levels = c("Monday", "Tuesday", "Wednesday", 
+                                          "Thursday", "Friday", "Saturday", 
+                                          "Sunday"))
+df_train = df_train[,-c(which(colnames(df_train) %in% c('date_account_created')))]
+
+```
+
+```{r}
+
+# Categorizing age in 9 groups
+df_train[df_train$age < 14 | df_train$age > 100,'age'] <- -1
+df_train$age <- findInterval(df_train$age, c(20,30,40,50,60,70,80,90))
+table(df_train$age)
+
+```
+
+```{r}
+
+#Detaching target variable from dataset for analysis
+labels = df_train['country_destination']
+df_train = df_train[-grep('country_destination', colnames(df_train))]
+
+```
+
+```{r}
+
+# Data manipulation to combine low observed values into one category before creating dummies
+df_train$affiliate_provider <- car::recode(df_train$affiliate_provider, "'baidu' = 'other';'daum' = 'other';'naver' = 'other';'wayn' = 'other';'yandex' = 'other';'facebook-open-graph' = 'facebook';'bing' = 'other';'email-marketing' = 'other';'gsp' = 'other';'meetup' = 'other';'padmapper' = 'other';'vast' = 'other';'yahoo' = 'other'")
+
+df_train$language<- car::recode(df_train$language,"'it'='other'; 'th'='other'; 'ru'='other'; 'pt'='other'; 'ja'='other'; 'sv'='other'; 'nl'='other'; 'tr'='other'; 'da'='other'; 'pl'='other'; 'cs'='other'; 'no'='other';'el'='other';'id'='other';'hu'='other';'fi'='other';'is'='other';'ca'='other';'hr'='other'")
+
+df_train$first_browser <- car::recode(df_train$first_browser,"'Android Browser' = 'other';'AOL Explorer' = 'other';'Apple Mail' = 'other';'Arora' = 'other';'Avant Browser' = 'other';'BlackBerry Browser' = 'other';'Camino' = 'other';'Chrome Mobile' = 'Chrome';'Chromium' = 'Chrome';'CometBird' = 'other';'Comodo Dragon' = 'other';'Conkeror' = 'other';'CoolNovo' = 'other';'Crazy Browser' = 'other';'Epic' = 'other';'Flock' = 'other';'Google Earth' = 'other';'Googlebot' = 'other';'IceDragon' = 'other';'IceWeasel' = 'other';'IE Mobile' = 'IE';'Iron' = 'other';'Kindle Browser' = 'other';'Maxthon' = 'other';'Mobile Firefox' = 'Firefox';'Mozilla' = 'other';'NetNewsWire' = 'other';'OmniWeb' = 'other';'Opera' = 'other';'Opera Mini' = 'other';'Opera Mobile' = 'other';'Outlook 2007' = 'other';'Pale Moon' = 'other';'Palm Pre web browser' = 'other';'PS Vita browser' = 'other';'RockMelt' = 'other';'SeaMonkey' = 'other';'Silk' = 'other';'SiteKiosk' = 'other';'SlimBrowser' = 'other';'Sogou Explorer' = 'other';'Stainless' = 'other';'TenFourFox' = 'other';'TheWorld Browser' = 'other';'wOSBrowser' = 'other';'Yandex.Browser' = 'other'")
+
+df_train$first_affiliate_tracked <- car::recode(df_train$first_affiliate_tracked, " '' = 'other';'local ops' = 'other';'marketing' = 'other';'product' = 'other';'tracked-other' = 'other'" )
+
+df_train$first_device_type <- car::recode(df_train$first_device_type,"'SmartPhone (Other)'='Other/Unknown';'Desktop (Other)' = 'Other/Unknown';'Android Phone' = 'Android';'Android Tablet' = 'Android'")
+
+df_train$dac_weekday <- car:: recode(df_train$dac_weekday,"'Monday' = 1; 'Tuesday' = 2; 'Wednesday' = 3; 'Thursday' = 4; 'Friday' = 5; 'Saturday' = 6; 'Sunday' = 7")
+
+
+# one-hot-encoding features
+ohe_feats = c('gender', 'signup_method', 'signup_flow', 'language', 'affiliate_channel', 'affiliate_provider', 'first_affiliate_tracked', 'signup_app', 'first_device_type', 'first_browser')
+dummies <- dummyVars(~ gender + signup_method + signup_flow + language + affiliate_channel + affiliate_provider + first_affiliate_tracked + signup_app + first_device_type + first_browser, data = df_train)
+df_all_ohe <- as.data.frame(predict(dummies, newdata = df_train));'bing' = 'other'
+X <- cbind(df_train[,-c(which(colnames(df_train) %in% ohe_feats))],df_all_ohe)
+
+```
+
+__Partition the dataset:__
+```{r}
+
+# split train and test
+y <- car::recode(labels$country_destination,"'NDF'=0; 'US'=1; 'other'=2; 'FR'=3; 'CA'=4; 'GB'=5; 'ES'=6; 'IT'=7; 'PT'=8; 'NL'=9; 'DE'=10; 'AU'=11")
+
+X <- cbind(X,y)
+
+names(X)[names(X) == 'gender.-unknown-'] <- 'genderUnknown'
+names(X)[names(X) == 'affiliate_channel.sem-brand'] <- 'affChanlsemBrand'
+names(X)[names(X) == 'affiliate_channel.sem-non-brand'] <- 'affchannelsemNonBrand'
+names(X)[names(X) == 'first_device_type.Mac Desktop'] <- 'first_dev_typeMacDesktop'
+names(X)[names(X) == 'first_device_type.Other/Unknown'] <- 'first_dev_typOtherUnknown'
+names(X)[names(X) == 'first_device_type.Windows Desktop'] <- 'first_dev_typWindDesktop'
+names(X)[names(X) == 'first_browser.-unknown-'] <- 'firstbrowserUnknown'
+names(X)[names(X) == 'first_browser.Mobile Safari'] <- 'first_browserMobileSafari'
+
+ZV <- nearZeroVar(X, saveMetrics = TRUE)
+ZV
+
+X=X %>% mutate_if(is.character, as.factor)
+
+set.seed(123)
+split = sample.split(y, SplitRatio = 0.8)
+training_set = subset(X, split == TRUE)
+validation_set = subset(X, split == FALSE)
+train_lab <- training_set$y
+valid_lab <- validation_set$y
+training_set = training_set[,-c(which(colnames(training_set) == c('y')))]
+validation_set = validation_set[,-c(which(colnames(validation_set) == c('y')))]
+
+```
+
+__Utility functions:__
+```{r}
+
+# Function to compute classification error
+classification_error <- function(conf_mat) {
+  conf_mat = as.matrix(conf_mat)
+  
+  error = 1 - sum(diag(conf_mat)) / sum(conf_mat)
+  
+  return (error)
+}
+
+# Function to normalize data
+normalize <- function(nm) {
+  return ((nm - min(nm)) / (max(nm) - min(nm)))
+}
+
+```
+
+__Predictive model using random forest algorithm:__
+```{r}
+
+#Random forest model
+train_rf <- cbind(training_set,train_lab) 
+train_rf <- dplyr::sample_n(train_rf, 10000)
+
+set.seed(12345)
+
+# Training with Random forest model
+modfit.rf <- randomForest(train_lab~ . , data=train_rf,method="class")
+modfit.rf
+
+# Predicting target variable for validation set
+pred_val<-predict(modfit.rf, validation_set, type = 'class')
+rf_conf_mtx<-table(true=valid_lab, pred = pred_val)
+
+# Error 
+cat("\n","RF Classification Error Rate:", classification_error(rf_conf_mtx), "\n")
+cat("RF Classification Accuracy Rate:",1- classification_error(rf_conf_mtx), "\n")
+
+```
+
+__Predictive model using SVM:__
+```{r}
+
+#SVM Model
+
+train_svm <-cbind(training_set,train_lab) 
+tune_svm <- dplyr::sample_n(train_svm, 1000)
+
+#Grid search for hyperparameters
+tuned_parameters <- tune.svm(train_lab~., data = tune_svm, gamma = 10^(-2:-1), cost = 5:10)
+summary(tuned_parameters )
+
+# training SVM model based on best performing hyperparameters
+train_svm <-cbind(training_set,train_lab) 
+train_svm <- dplyr::sample_n(train_svm, 10000)
+mod.svm <- svm(train_lab~., data = train_svm, method="C-classification", kernal="radial", 
+               gamma=0.01, cost=8)
+summary(mod.svm)
+pred_vald<-predict(mod.svm, validation_set)
+svm_conf_mtx<-table(true=valid_lab, pred = pred_vald)
+
+# Error 
+cat("SVM Classification Error Rate:", classification_error(svm_conf_mtx), "\n")
+cat("SVM Classification Accuracy Rate:",1- classification_error(svm_conf_mtx), "\n")
+
+```
+
+__Predictive model using KNN:__
+```{r}
+
+# KNN Model
+
+set.seed(3333)
+training_set_knn=training_set %>% mutate_if(is.factor, as.numeric)
+validation_set_knn = validation_set %>% mutate_if(is.factor, as.numeric)
+tknn_Norm <- as.data.frame(lapply(training_set_knn, normalize))
+vknn_Norm <- as.data.frame(lapply(validation_set_knn, normalize))
+
+train_knn <-cbind(tknn_Norm,train_lab) 
+train_knn <- dplyr::sample_n(train_knn, 10000)
+valid_knn <-cbind(vknn_Norm,valid_lab) 
+valid_knn <- dplyr::sample_n(valid_knn, 10000)
+
+pr <- knn(train_knn,valid_knn,cl=valid_knn$valid_lab,k=20)
+knn_conf_mtx<-table(true=valid_knn$valid_lab, pred = pr)
+
+# Error 
+cat("KNN Classification Error Rate:", classification_error(svm_conf_mtx), "\n")
+cat("KNN Classification Accuracy Rate:",1- classification_error(knn_conf_mtx), "\n")
+
+
+```
+
+__Predictive model using Naive Bayes algorithm:__
+```{r}
+
+# Naive Bayes model
+
+train_NB <- cbind(training_set,train_lab)
+valid_NB <- cbind(validation_set,valid_lab)
+
+train_NB <- train_NB %>% mutate_if(is.numeric, as.factor)
+valid_NB <- valid_NB %>% mutate_if(is.numeric, as.factor)
+train_NB <- dplyr::sample_n(train_NB, 10000)
+valid_NB <- dplyr::sample_n(valid_NB, 10000)
+
+valid_lab_NB <- valid_NB$valid_lab
+valid_NB = valid_NB[,-c(which(colnames(valid_NB) == c('valid_lab')))]
+
+modNB <- naiveBayes(train_lab~. , data = train_NB)
+
+summary(modNB)
+print(modNB)
+
+
+NB_preds <- predict(modNB, newdata = valid_NB)
+NB_conf_mtx<-table(true=valid_lab_NB, pred = NB_preds)
+
+# Error 
+cat("NB Training Classification Error Rate:", classification_error(NB_conf_mtx), "\n")
+cat("NB Training Classification Accuracy Rate:",1- classification_error(NB_conf_mtx), "\n")
+
+```
+
+
+__Predictive model using XGBoost algorithm:__
+```{r}
+
+# XGBoost model
+
+## Anayse and visualize xgboost
+train_xgb = X[-c(which(colnames(X) == 'y'))]
+xgb <- xgboost(data = data.matrix(train_xgb), 
+               label = as.numeric(as.character(y)), 
+               eta = 0.1,
+               max_depth = 9, 
+               nround=25, 
+               subsample = 0.5,
+               colsample_bytree = 0.5,
+               seed = 1,
+               eval_metric = "merror",
+               objective = "multi:softprob",
+               num_class = 12,
+               nthread = 3,
+               missing=NA
+)
+
+
+model <- xgb.dump(xgb, with.stats = T)
+model[1:10]
+names <- dimnames(data.matrix(X))[[2]]
+importance_matrix <- xgb.importance(names, model = xgb)
+
+xgb.plot.importance(importance_matrix[1:20,])
+
+params <- list(booster = "gbtree", objective = "multi:softprob", num_class = 12)
+train_lab_xgb <-as.numeric(as.character(train_lab))
+valid_lab_xgb <-as.numeric(as.character(valid_lab))
+xgbcv <- xgb.cv(params = params, data = data.matrix(training_set), nrounds = 60, prediction = TRUE,
+                label = train_lab_xgb, nfold = 5, showsd = TRUE, stratified = TRUE, print.every.n = 10, 
+                early_stop_round = 20, maximize = FALSE)
+
+xgb_train_preds <- data.frame(xgbcv$pred) %>% mutate(max = max.col(., ties.method = "last"), 
+                                                     label = train_lab_xgb+1)
+head(xgb_train_preds,20)
+
+xgb_conf_mat <- table(true = train_lab_xgb+1, pred = xgb_train_preds$max)
+
+# Error 
+cat("XGB Training Classification Error Rate:", classification_error(xgb_conf_mat), "\n")
+cat("XGB Training Classification Accuracy Rate:",1- classification_error(xgb_conf_mat), "\n")
+
+xgb_train <- xgb.DMatrix(data = data.matrix(training_set), label = as.numeric(train_lab_xgb))
+xgb_val <- xgb.DMatrix(data = data.matrix(validation_set), label = as.numeric(valid_lab_xgb))
+
+xgb_model <- xgb.train(params = params, data = xgb_train, nrounds = 60)
+
+xgb_val_preds <- predict(xgb_model, newdata = xgb_val)
+xgb_val_out <- matrix(xgb_val_preds, nrow = 12, ncol = length(xgb_val_preds) / 12) %>% 
+  t() %>%
+  data.frame() %>%
+  mutate(max = max.col(., ties.method = "last"), label = valid_lab_xgb + 1) 
+head(xgb_val_out,20)
+
+# Confustion Matrix
+xgb_val_conf <- table(true = valid_lab_xgb + 1, pred = xgb_val_out$max)
+
+# Error 
+cat("XGB validation Classification Error Rate:", classification_error(xgb_val_conf), "\n")
+cat("XGB validation Classification Accuracy Rate:",1- classification_error(xgb_val_conf), "\n")
+
+```
+
